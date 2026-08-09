@@ -30,7 +30,7 @@ from database import (
 # TOKEN
 # ============================================================
 
-BOT_TOKEN = "ISI_TOKEN_BOT_KAMU"
+BOT_TOKEN = "8922784238:AAHFLJJFa_vktTSxQOmoRDL76YWwReJv-8c"
 
 
 # ============================================================
