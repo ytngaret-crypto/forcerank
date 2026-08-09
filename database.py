@@ -74,67 +74,191 @@ def add_force_rank(
     conn.close()
 
 
-def get_force_rank(chat_id, user_id):
+async def rank_comment_handler(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
 
-    conn = get_connection()
-    cursor = conn.cursor()
+    message = update.effective_message
 
-    cursor.execute("""
-        SELECT *
-        FROM force_rank
-        WHERE chat_id = ?
-        AND user_id = ?
-    """, (
-        chat_id,
-        user_id
-    ))
+    if not message:
+        return
 
-    result = cursor.fetchone()
+    # ========================================================
+    # CEK KOMENTAR POST RANK #9
+    # ========================================================
 
-    conn.close()
+    if not is_rank_comment(message):
+        return
 
-    return result
+    user = message.from_user
 
+    if not user:
+        return
 
-def remove_force_rank(chat_id, user_id):
+    logger.info(
+        "Komentar rank terdeteksi: %s (%s)",
+        user.full_name,
+        user.id
+    )
 
-    conn = get_connection()
-    cursor = conn.cursor()
+    # ========================================================
+    # CARI FORCE RANK USER
+    # ========================================================
 
-    cursor.execute("""
-        DELETE FROM force_rank
-        WHERE chat_id = ?
-        AND user_id = ?
-    """, (
-        chat_id,
-        user_id
-    ))
+    from database import get_force_rank_by_user
 
-    conn.commit()
+    records = get_force_rank_by_user(
+        user.id
+    )
 
-    deleted = cursor.rowcount
+    if not records:
 
-    conn.close()
+        logger.info(
+            "User %s komentar tetapi tidak sedang Force Rank.",
+            user.id
+        )
 
-    return deleted > 0
+        return
 
+    # ========================================================
+    # PROSES SEMUA FORCE RANK USER
+    # ========================================================
 
-def get_all_force_rank(chat_id):
+    for record in records:
 
-    conn = get_connection()
-    cursor = conn.cursor()
+        main_chat_id = record["chat_id"]
 
-    cursor.execute("""
-        SELECT *
-        FROM force_rank
-        WHERE chat_id = ?
-        ORDER BY forced_at ASC
-    """, (
-        chat_id,
-    ))
+        nama = record["nama"]
 
-    results = cursor.fetchall()
+        username = record["username"]
 
-    conn.close()
+        forced_by = record["forced_by"]
 
-    return results
+        # ----------------------------------------------------
+        # UNMUTE
+        # ----------------------------------------------------
+
+        try:
+
+            await unmute_user(
+                context.bot,
+                main_chat_id,
+                user.id
+            )
+
+        except Exception as e:
+
+            logger.exception(e)
+
+            continue
+
+        # ----------------------------------------------------
+        # HAPUS DATABASE
+        # ----------------------------------------------------
+
+        remove_force_rank(
+            main_chat_id,
+            user.id
+        )
+
+        # ----------------------------------------------------
+        # USERNAME
+        # ----------------------------------------------------
+
+        if username:
+
+            username_text = (
+                "@"
+                + html.escape(username)
+            )
+
+        else:
+
+            username_text = (
+                "Tidak ada username"
+            )
+
+        user_mention = mention_user(user)
+
+        # ====================================================
+        # NOTIFIKASI DI GRUP UTAMA
+        # ====================================================
+
+        group_text = (
+            "✅ <b>FORCE RANK SELESAI</b>\n\n"
+
+            f"👤 User: {user_mention}\n"
+            f"🔹 Username: {username_text}\n\n"
+
+            "📝 Rank: <b>SUDAH DIISI</b>\n"
+            "💬 Komentar rank: <b>TERDETEKSI</b>\n"
+            "🔊 Status: <b>UNMUTED OTOMATIS</b>\n\n"
+
+            "🎉 User telah menyelesaikan "
+            "Force Rank."
+        )
+
+        try:
+
+            await context.bot.send_message(
+                chat_id=main_chat_id,
+                text=group_text,
+                parse_mode="HTML"
+            )
+
+        except Exception as e:
+
+            logger.exception(e)
+
+        # ====================================================
+        # NOTIFIKASI ADMIN
+        # ====================================================
+
+        admin_text = (
+            "🔔 <b>NOTIFIKASI FORCE RANK</b>\n\n"
+
+            f"👤 User: {user_mention}\n"
+            f"🔹 Username: {username_text}\n\n"
+
+            "✅ Telah mengisi rank\n"
+            "🔊 Telah di-unmute otomatis\n\n"
+
+            "📌 Komentar terdeteksi pada:\n"
+            f"https://t.me/{RANK_CHANNEL}/{RANK_POST_ID}"
+        )
+
+        try:
+
+            await context.bot.send_message(
+                chat_id=forced_by,
+                text=admin_text,
+                parse_mode="HTML"
+            )
+
+        except Exception as e:
+
+            logger.info(
+                "Tidak dapat DM admin %s: %s",
+                forced_by,
+                e
+            )
+
+        # ====================================================
+        # REPLY DI KOMENTAR
+        # ====================================================
+
+        try:
+
+            await message.reply_text(
+                "✅ Rank kamu telah terdeteksi.\n\n"
+                "🔊 Kamu sudah di-unmute dari grup.\n"
+                "🎉 Selamat datang kembali!"
+            )
+
+        except Exception as e:
+
+            logger.info(
+                "Gagal reply komentar: %s",
+                e
+    )
