@@ -1,21 +1,24 @@
+import os
 import logging
 import html
 
 from telegram import (
     Update,
-    ChatPermissions
+    ChatPermissions,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup
 )
+
+from telegram.constants import ChatMemberStatus
 
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     ContextTypes,
-    ChatMemberHandler,
     MessageHandler,
+    ChatMemberHandler,
     filters
 )
-
-from telegram.constants import ChatMemberStatus
 
 from database import (
     init_db,
@@ -27,12 +30,19 @@ from database import (
 
 
 # ============================================================
-# TOKEN
+# CONFIG
 # ============================================================
 
-import os
-
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+# Channel tempat rank diisi
+RANK_CHANNEL = "abshsjjjv"
+
+# Nomor postingan rank
+RANK_POST_ID = 9
+
+# Link postingan rank
+RANK_LINK = f"https://t.me/{RANK_CHANNEL}/{RANK_POST_ID}"
 
 
 # ============================================================
@@ -48,29 +58,14 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================
-# CEK ADMIN
+# CEK TOKEN
 # ============================================================
 
-async def is_admin(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
+if not BOT_TOKEN:
 
-    if not update.effective_chat:
-        return False
-
-    if not update.effective_user:
-        return False
-
-    member = await context.bot.get_chat_member(
-        update.effective_chat.id,
-        update.effective_user.id
+    raise RuntimeError(
+        "BOT_TOKEN belum diatur di Railway Variables."
     )
-
-    return member.status in [
-        ChatMemberStatus.ADMINISTRATOR,
-        ChatMemberStatus.OWNER
-    ]
 
 
 # ============================================================
@@ -91,7 +86,41 @@ def mention_user(user):
 
 
 # ============================================================
-# MUTE USER
+# CEK ADMIN
+# ============================================================
+
+async def is_admin(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    if not update.effective_chat:
+        return False
+
+    if not update.effective_user:
+        return False
+
+    try:
+
+        member = await context.bot.get_chat_member(
+            update.effective_chat.id,
+            update.effective_user.id
+        )
+
+        return member.status in [
+            ChatMemberStatus.ADMINISTRATOR,
+            ChatMemberStatus.OWNER
+        ]
+
+    except Exception as e:
+
+        logger.exception(e)
+
+        return False
+
+
+# ============================================================
+# MUTE
 # ============================================================
 
 async def mute_user(
@@ -100,28 +129,18 @@ async def mute_user(
     user_id
 ):
 
-    permissions = ChatPermissions(
-        can_send_messages=False,
-        can_send_audios=False,
-        can_send_documents=False,
-        can_send_photos=False,
-        can_send_videos=False,
-        can_send_video_notes=False,
-        can_send_voice_notes=False,
-        can_send_polls=False,
-        can_send_other_messages=False,
-        can_add_web_page_previews=False
-    )
+    permissions = ChatPermissions.no_permissions()
 
     await bot.restrict_chat_member(
         chat_id=chat_id,
         user_id=user_id,
-        permissions=permissions
+        permissions=permissions,
+        use_independent_chat_permissions=True
     )
 
 
 # ============================================================
-# UNMUTE USER
+# UNMUTE
 # ============================================================
 
 async def unmute_user(
@@ -130,23 +149,36 @@ async def unmute_user(
     user_id
 ):
 
-    permissions = ChatPermissions(
-        can_send_messages=True,
-        can_send_audios=True,
-        can_send_documents=True,
-        can_send_photos=True,
-        can_send_videos=True,
-        can_send_video_notes=True,
-        can_send_voice_notes=True,
-        can_send_polls=True,
-        can_send_other_messages=True,
-        can_add_web_page_previews=True
-    )
+    permissions = ChatPermissions.all_permissions()
 
     await bot.restrict_chat_member(
         chat_id=chat_id,
         user_id=user_id,
-        permissions=permissions
+        permissions=permissions,
+        use_independent_chat_permissions=True
+    )
+
+
+# ============================================================
+# /START
+# ============================================================
+
+async def start(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    if not update.message:
+        return
+
+    await update.message.reply_text(
+        "🤖 <b>FORCE RANK BOT</b>\n\n"
+        "Bot aktif.\n\n"
+        "Admin:\n"
+        "• /forcerank\n"
+        "• /unforcerank\n"
+        "• /forceranklist",
+        parse_mode="HTML"
     )
 
 
@@ -164,11 +196,13 @@ async def force_rank(
     if not message:
         return
 
+    chat = update.effective_chat
+
     # --------------------------------------------------------
     # HARUS GROUP
     # --------------------------------------------------------
 
-    if update.effective_chat.type not in [
+    if chat.type not in [
         "group",
         "supergroup"
     ]:
@@ -180,7 +214,7 @@ async def force_rank(
         return
 
     # --------------------------------------------------------
-    # CEK ADMIN
+    # ADMIN
     # --------------------------------------------------------
 
     if not await is_admin(update, context):
@@ -198,9 +232,11 @@ async def force_rank(
     if not message.reply_to_message:
 
         await message.reply_text(
-            "❌ Reply pesan orang yang ingin di-force rank.\n\n"
+            "❌ Reply pesan member yang ingin "
+            "di-force rank.\n\n"
             "Contoh:\n"
-            "Reply pesan A lalu ketik /forcerank"
+            "Reply pesan A lalu ketik:\n"
+            "/forcerank"
         )
 
         return
@@ -216,7 +252,7 @@ async def force_rank(
         return
 
     # --------------------------------------------------------
-    # JANGAN FORCE BOT
+    # BOT
     # --------------------------------------------------------
 
     if target.is_bot:
@@ -227,16 +263,30 @@ async def force_rank(
 
         return
 
-    chat_id = update.effective_chat.id
-
     # --------------------------------------------------------
-    # CEK TARGET ADMIN
+    # CEK TARGET
     # --------------------------------------------------------
 
-    target_member = await context.bot.get_chat_member(
-        chat_id,
-        target.id
-    )
+    try:
+
+        target_member = await context.bot.get_chat_member(
+            chat.id,
+            target.id
+        )
+
+    except Exception as e:
+
+        logger.exception(e)
+
+        await message.reply_text(
+            "❌ Gagal mendapatkan data member."
+        )
+
+        return
+
+    # --------------------------------------------------------
+    # ADMIN / OWNER
+    # --------------------------------------------------------
 
     if target_member.status in [
         ChatMemberStatus.ADMINISTRATOR,
@@ -244,17 +294,18 @@ async def force_rank(
     ]:
 
         await message.reply_text(
-            "❌ Tidak bisa memute admin/owner."
+            "❌ Tidak bisa melakukan Force Rank "
+            "kepada admin/owner."
         )
 
         return
 
     # --------------------------------------------------------
-    # CEK SUDAH FORCE RANK
+    # SUDAH TERDAFTAR?
     # --------------------------------------------------------
 
     existing = get_force_rank(
-        chat_id,
+        chat.id,
         target.id
     )
 
@@ -262,7 +313,7 @@ async def force_rank(
 
         await message.reply_text(
             f"⚠️ {mention_user(target)} "
-            f"sudah masuk daftar Force Rank.",
+            "sudah terkena Force Rank.",
             parse_mode="HTML"
         )
 
@@ -276,7 +327,7 @@ async def force_rank(
 
         await mute_user(
             context.bot,
-            chat_id,
+            chat.id,
             target.id
         )
 
@@ -285,19 +336,20 @@ async def force_rank(
         logger.exception(e)
 
         await message.reply_text(
-            "❌ Gagal mute user.\n\n"
-            "Pastikan bot adalah admin dan memiliki "
-            "izin Restrict Members."
+            "❌ <b>Gagal mute member.</b>\n\n"
+            "Pastikan bot merupakan admin grup "
+            "dan memiliki izin <b>Restrict Members</b>.",
+            parse_mode="HTML"
         )
 
         return
 
     # --------------------------------------------------------
-    # SIMPAN DATABASE
+    # DATABASE
     # --------------------------------------------------------
 
     add_force_rank(
-        chat_id=chat_id,
+        chat_id=chat.id,
         user_id=target.id,
         nama=target.full_name,
         username=target.username,
@@ -305,32 +357,55 @@ async def force_rank(
     )
 
     # --------------------------------------------------------
-    # PESAN
+    # BUTTON
     # --------------------------------------------------------
 
-    username_text = (
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                "📝 ISI RANK",
+                url=RANK_LINK
+            )
+        ]
+    ]
+
+    reply_markup = InlineKeyboardMarkup(
+        keyboard
+    )
+
+    username = (
         f"@{html.escape(target.username)}"
         if target.username
         else "Tidak ada username"
     )
 
+    # --------------------------------------------------------
+    # PESAN FORCE RANK
+    # --------------------------------------------------------
+
     text = (
         "🔔 <b>FORCE RANK</b>\n\n"
 
         f"👤 User: {mention_user(target)}\n"
-        f"🔹 Username: {username_text}\n\n"
+        f"🔹 Username: {username}\n\n"
 
         "🔇 <b>Status: MUTED</b>\n"
         "📝 <b>Rank: BELUM DIISI</b>\n\n"
 
-        "Silakan isi rank terlebih dahulu.\n"
-        "Setelah rank selesai, user akan "
-        "<b>otomatis di-unmute</b>."
+        "Silakan isi rank terlebih dahulu "
+        "dengan memberikan komentar pada "
+        "postingan rank.\n\n"
+
+        "Setelah kamu berkomentar di postingan "
+        "rank, bot akan otomatis membuka mute.\n\n"
+
+        "👇 <b>Klik tombol di bawah:</b>"
     )
 
     await message.reply_text(
         text,
-        parse_mode="HTML"
+        parse_mode="HTML",
+        reply_markup=reply_markup
     )
 
 
@@ -348,7 +423,9 @@ async def unforce_rank(
     if not message:
         return
 
-    if update.effective_chat.type not in [
+    chat = update.effective_chat
+
+    if chat.type not in [
         "group",
         "supergroup"
     ]:
@@ -366,7 +443,8 @@ async def unforce_rank(
     if not message.reply_to_message:
 
         await message.reply_text(
-            "❌ Reply pesan user lalu ketik /unforcerank"
+            "❌ Reply pesan user lalu ketik "
+            "/unforcerank"
         )
 
         return
@@ -376,10 +454,8 @@ async def unforce_rank(
     if not target:
         return
 
-    chat_id = update.effective_chat.id
-
     existing = get_force_rank(
-        chat_id,
+        chat.id,
         target.id
     )
 
@@ -396,7 +472,7 @@ async def unforce_rank(
 
         await unmute_user(
             context.bot,
-            chat_id,
+            chat.id,
             target.id
         )
 
@@ -411,7 +487,7 @@ async def unforce_rank(
         return
 
     remove_force_rank(
-        chat_id,
+        chat.id,
         target.id
     )
 
@@ -437,7 +513,9 @@ async def force_rank_list(
     if not message:
         return
 
-    if update.effective_chat.type not in [
+    chat = update.effective_chat
+
+    if chat.type not in [
         "group",
         "supergroup"
     ]:
@@ -452,22 +530,27 @@ async def force_rank_list(
 
         return
 
-    chat_id = update.effective_chat.id
-
-    users = get_all_force_rank(chat_id)
+    users = get_all_force_rank(
+        chat.id
+    )
 
     if not users:
 
         await message.reply_text(
-            "✅ Tidak ada member yang sedang "
-            "terkena Force Rank."
+            "✅ Tidak ada member yang "
+            "sedang terkena Force Rank."
         )
 
         return
 
-    text = "🔒 <b>FORCE RANK AKTIF</b>\n\n"
+    text = (
+        "🔒 <b>FORCE RANK AKTIF</b>\n\n"
+    )
 
-    for index, user in enumerate(users, start=1):
+    for index, user in enumerate(
+        users,
+        start=1
+    ):
 
         nama = html.escape(
             user["nama"] or "Unknown"
@@ -475,15 +558,20 @@ async def force_rank_list(
 
         if user["username"]:
 
-            username = f"@{html.escape(user['username'])}"
+            username = (
+                "@"
+                + html.escape(
+                    user["username"]
+                )
+            )
 
         else:
 
             username = "tanpa username"
 
         text += (
-            f"<b>{index}.</b> {nama}\n"
-            f"   └ {username}\n"
+            f"<b>{index}. {nama}</b>\n"
+            f"   ├ Username: {username}\n"
             f"   └ 🔇 BELUM ISI RANK\n\n"
         )
 
@@ -494,280 +582,150 @@ async def force_rank_list(
 
 
 # ============================================================
-# DETEKSI MEMBER UNMUTE
+# CEK APAKAH PESAN ADALAH KOMENTAR RANK
 # ============================================================
 
-async def member_status_changed(
+def is_rank_comment(message):
+
+    if not message:
+        return False
+
+    # --------------------------------------------------------
+    # Harus punya user
+    # --------------------------------------------------------
+
+    if not message.from_user:
+
+        return False
+
+    # --------------------------------------------------------
+    # Harus berupa reply
+    # --------------------------------------------------------
+
+    replied = message.reply_to_message
+
+    if not replied:
+
+        return False
+
+    # --------------------------------------------------------
+    # Cara baru PTB / Bot API
+    # --------------------------------------------------------
+
+    origin = getattr(
+        replied,
+        "forward_origin",
+        None
+    )
+
+    if origin:
+
+        origin_type = getattr(
+            origin,
+            "type",
+            None
+        )
+
+        origin_chat = getattr(
+            origin,
+            "chat",
+            None
+        )
+
+        origin_message_id = getattr(
+            origin,
+            "message_id",
+            None
+        )
+
+        if (
+            origin_type == "channel"
+            and origin_chat
+            and origin_message_id == RANK_POST_ID
+        ):
+
+            username = (
+                origin_chat.username or ""
+            ).lower()
+
+            if username == RANK_CHANNEL.lower():
+
+                return True
+
+    # --------------------------------------------------------
+    # Kompatibilitas versi lama
+    # --------------------------------------------------------
+
+    old_chat = getattr(
+        replied,
+        "forward_from_chat",
+        None
+    )
+
+    old_message_id = getattr(
+        replied,
+        "forward_from_message_id",
+        None
+    )
+
+    if old_chat and old_message_id:
+
+        username = (
+            old_chat.username or ""
+        ).lower()
+
+        if (
+            username == RANK_CHANNEL.lower()
+            and old_message_id == RANK_POST_ID
+        ):
+
+            return True
+
+    return False
+
+
+# ============================================================
+# KOMENTAR RANK TERDETEKSI
+# ============================================================
+
+async def rank_comment_handler(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE
 ):
 
-    chat_member_update = update.chat_member
+    message = update.effective_message
 
-    if not chat_member_update:
-        return
-
-    chat = chat_member_update.chat
-
-    # Hanya group
-    if chat.type not in [
-        "group",
-        "supergroup"
-    ]:
-
-        return
-
-    old_member = chat_member_update.old_chat_member
-    new_member = chat_member_update.new_chat_member
-
-    user = new_member.user
-
-    if user.is_bot:
+    if not message:
         return
 
     # --------------------------------------------------------
-    # CEK DATABASE
+    # CEK APAKAH KOMENTAR DI POST #9
     # --------------------------------------------------------
 
-    tracked = get_force_rank(
-        chat.id,
+    if not is_rank_comment(message):
+
+        return
+
+    user = message.from_user
+
+    if not user:
+
+        return
+
+    logger.info(
+        "Komentar rank terdeteksi: %s (%s)",
+        user.full_name,
         user.id
     )
 
-    if not tracked:
-        return
-
     # --------------------------------------------------------
-    # STATUS LAMA
+    # CARI SEMUA GROUP YANG USER INI SEDANG FORCE RANK
     # --------------------------------------------------------
 
-    old_restricted = (
-        old_member.status == ChatMemberStatus.RESTRICTED
-    )
+    # Karena satu user bisa berada di beberapa grup,
+    # kita cari berdasarkan database.
 
-    # --------------------------------------------------------
-    # STATUS BARU
-    # --------------------------------------------------------
-
-    new_is_member = (
-        new_member.status == ChatMemberStatus.MEMBER
-    )
-
-    # --------------------------------------------------------
-    # CEK APAKAH BENAR-BENAR SUDAH BISA NGOMONG
-    # --------------------------------------------------------
-
-    new_can_send = True
-
-    if new_member.status == ChatMemberStatus.RESTRICTED:
-
-        new_can_send = bool(
-            getattr(
-                new_member,
-                "can_send_messages",
-                False
-            )
-        )
-
-    # --------------------------------------------------------
-    # UNMUTE TERDETEKSI
-    # --------------------------------------------------------
-
-    if old_restricted and (
-        new_is_member or new_can_send
-    ):
-
-        logger.info(
-            "Force Rank selesai: %s (%s)",
-            user.full_name,
-            user.id
-        )
-
-        # ----------------------------------------------------
-        # HAPUS DATABASE
-        # ----------------------------------------------------
-
-        remove_force_rank(
-            chat.id,
-            user.id
-        )
-
-        # ----------------------------------------------------
-        # NOTIFIKASI KE ADMIN
-        # ----------------------------------------------------
-
-        mention = mention_user(user)
-
-        text = (
-            "✅ <b>FORCE RANK SELESAI</b>\n\n"
-
-            f"👤 User: {mention}\n\n"
-
-            "📝 Rank: <b>SUDAH DIISI</b>\n"
-            "🔊 Status: <b>UNMUTED OTOMATIS</b>\n\n"
-
-            "🎉 User telah menyelesaikan "
-            "proses Force Rank."
-        )
-
-        try:
-
-            admins = await context.bot.get_chat_administrators(
-                chat.id
-            )
-
-            for admin in admins:
-
-                admin_user = admin.user
-
-                if admin_user.is_bot:
-                    continue
-
-                try:
-
-                    await context.bot.send_message(
-                        chat_id=admin_user.id,
-                        text=text,
-                        parse_mode="HTML"
-                    )
-
-                except Exception:
-
-                    # Admin mungkin belum pernah
-                    # membuka chat bot
-                    pass
-
-            # ------------------------------------------------
-            # NOTIFIKASI DI GRUP
-            # ------------------------------------------------
-
-            await context.bot.send_message(
-                chat_id=chat.id,
-                text=(
-                    "🎉 <b>FORCE RANK SELESAI</b>\n\n"
-                    f"{mention} telah mengisi rank.\n"
-                    "🔊 User telah di-unmute otomatis."
-                ),
-                parse_mode="HTML"
-            )
-
-        except Exception as e:
-
-            logger.exception(e)
-
-
-# ============================================================
-# START
-# ============================================================
-
-async def start(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    await update.message.reply_text(
-        "🤖 <b>Force Rank Bot</b>\n\n"
-        "Bot aktif.\n\n"
-        "Admin:\n"
-        "• /forcerank — Force Rank user\n"
-        "• /unforcerank — Batalkan Force Rank\n"
-        "• /forceranklist — Lihat daftar\n\n"
-        "Gunakan command dengan cara reply "
-        "pesan user.",
-        parse_mode="HTML"
-    )
-
-
-# ============================================================
-# ERROR HANDLER
-# ============================================================
-
-async def error_handler(
-    update: object,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    logger.exception(
-        "Terjadi error:",
-        exc_info=context.error
-    )
-
-
-# ============================================================
-# MAIN
-# ============================================================
-
-def main():
-
-    # Database
-    init_db()
-
-    # Application
-    app = (
-        ApplicationBuilder()
-        .token(BOT_TOKEN)
-        .build()
-    )
-
-    # Commands
-    app.add_handler(
-        CommandHandler(
-            "start",
-            start
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "forcerank",
-            force_rank
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "unforcerank",
-            unforce_rank
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "forceranklist",
-            force_rank_list
-        )
-    )
-
-    # --------------------------------------------------------
-    # CHAT MEMBER HANDLER
-    # --------------------------------------------------------
-
-    app.add_handler(
-        ChatMemberHandler(
-            member_status_changed,
-            ChatMemberHandler.CHAT_MEMBER
-        )
-    )
-
-    # Error
-    app.add_error_handler(
-        error_handler
-    )
-
-    print("===================================")
-    print("🤖 FORCE RANK BOT")
-    print("===================================")
-    print("✅ Bot sedang berjalan...")
-    print("===================================")
-
-    app.run_polling(
-        allowed_updates=Update.ALL_TYPES
-    )
-
-
-# ============================================================
-# RUN
-# ============================================================
-
-if __name__ == "__main__":
-    main()
+    # Ambil chat_id dari context cache sederhana.
+    #
+    # Kita akan menggunakan database function tambahan
+    # di bawah.
