@@ -3,10 +3,6 @@ import sqlite3
 from datetime import datetime
 
 
-# ============================================================
-# DATABASE
-# ============================================================
-
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "forcerank.db")
 
@@ -21,10 +17,6 @@ def get_connection():
 
     return conn
 
-
-# ============================================================
-# INIT DATABASE
-# ============================================================
 
 def init_db():
 
@@ -46,10 +38,6 @@ def init_db():
     conn.commit()
     conn.close()
 
-
-# ============================================================
-# TAMBAH FORCE RANK
-# ============================================================
 
 def add_force_rank(
     chat_id,
@@ -86,10 +74,6 @@ def add_force_rank(
     conn.close()
 
 
-# ============================================================
-# CEK FORCE RANK
-# ============================================================
-
 def get_force_rank(chat_id, user_id):
 
     conn = get_connection()
@@ -111,10 +95,6 @@ def get_force_rank(chat_id, user_id):
 
     return result
 
-
-# ============================================================
-# HAPUS FORCE RANK
-# ============================================================
 
 def remove_force_rank(chat_id, user_id):
 
@@ -138,10 +118,6 @@ def remove_force_rank(chat_id, user_id):
 
     return deleted > 0
 
-
-# ============================================================
-# SEMUA FORCE RANK
-# ============================================================
 
 def get_all_force_rank(chat_id):
 
