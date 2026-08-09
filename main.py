@@ -30,7 +30,9 @@ from database import (
 # TOKEN
 # ============================================================
 
-BOT_TOKEN = "8922784238:AAHFLJJFa_vktTSxQOmoRDL76YWwReJv-8c"
+import os
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 
 # ============================================================
