@@ -1027,7 +1027,7 @@ async def force_list(
     ):
         return
 
-   rows = get_force_list(
+    rows = get_force_list(
         update.effective_chat.id
     )
 
