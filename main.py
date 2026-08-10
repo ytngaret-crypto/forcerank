@@ -9,14 +9,15 @@ from telegram import (
     InlineKeyboardMarkup
 )
 
-from telegram.constants import ChatMemberStatus
+from telegram.constants import (
+    ChatMemberStatus
+)
 
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
-    ContextTypes,
     MessageHandler,
-    ChatMemberHandler,
+    ContextTypes,
     filters
 )
 
@@ -24,6 +25,7 @@ from database import (
     init_db,
     add_force_rank,
     get_force_rank,
+    get_force_rank_by_user,
     remove_force_rank,
     get_all_force_rank
 )
@@ -35,14 +37,20 @@ from database import (
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# Channel tempat rank diisi
+
+# ============================================================
+# CHANNEL RANK
+# ============================================================
+
 RANK_CHANNEL = "abshsjjjv"
 
-# Nomor postingan rank
 RANK_POST_ID = 9
 
-# Link postingan rank
-RANK_LINK = f"https://t.me/{RANK_CHANNEL}/{RANK_POST_ID}"
+RANK_LINK = (
+    f"https://t.me/"
+    f"{RANK_CHANNEL}/"
+    f"{RANK_POST_ID}"
+)
 
 
 # ============================================================
@@ -50,7 +58,12 @@ RANK_LINK = f"https://t.me/{RANK_CHANNEL}/{RANK_POST_ID}"
 # ============================================================
 
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    format=(
+        "%(asctime)s - "
+        "%(name)s - "
+        "%(levelname)s - "
+        "%(message)s"
+    ),
     level=logging.INFO
 )
 
@@ -58,13 +71,13 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================
-# CEK TOKEN
+# TOKEN CHECK
 # ============================================================
 
 if not BOT_TOKEN:
 
     raise RuntimeError(
-        "BOT_TOKEN belum diatur di Railway Variables."
+        "BOT_TOKEN belum dibuat di Railway Variables."
     )
 
 
@@ -86,7 +99,25 @@ def mention_user(user):
 
 
 # ============================================================
-# CEK ADMIN
+# USERNAME
+# ============================================================
+
+def username_text(user):
+
+    if user.username:
+
+        return (
+            "@"
+            + html.escape(
+                user.username
+            )
+        )
+
+    return "Tidak ada username"
+
+
+# ============================================================
+# CHECK ADMIN
 # ============================================================
 
 async def is_admin(
@@ -94,27 +125,31 @@ async def is_admin(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
-    if not update.effective_chat:
-        return False
+    chat = update.effective_chat
+    user = update.effective_user
 
-    if not update.effective_user:
+    if not chat or not user:
+
         return False
 
     try:
 
         member = await context.bot.get_chat_member(
-            update.effective_chat.id,
-            update.effective_user.id
+            chat_id=chat.id,
+            user_id=user.id
         )
 
-        return member.status in [
+        return member.status in (
             ChatMemberStatus.ADMINISTRATOR,
             ChatMemberStatus.OWNER
-        ]
+        )
 
     except Exception as e:
 
-        logger.exception(e)
+        logger.exception(
+            "Gagal mengecek admin: %s",
+            e
+        )
 
         return False
 
@@ -129,7 +164,18 @@ async def mute_user(
     user_id
 ):
 
-    permissions = ChatPermissions.no_permissions()
+    permissions = ChatPermissions(
+        can_send_messages=False,
+        can_send_audios=False,
+        can_send_documents=False,
+        can_send_photos=False,
+        can_send_videos=False,
+        can_send_video_notes=False,
+        can_send_voice_notes=False,
+        can_send_polls=False,
+        can_send_other_messages=False,
+        can_add_web_page_previews=False
+    )
 
     await bot.restrict_chat_member(
         chat_id=chat_id,
@@ -149,7 +195,18 @@ async def unmute_user(
     user_id
 ):
 
-    permissions = ChatPermissions.all_permissions()
+    permissions = ChatPermissions(
+        can_send_messages=True,
+        can_send_audios=True,
+        can_send_documents=True,
+        can_send_photos=True,
+        can_send_videos=True,
+        can_send_video_notes=True,
+        can_send_voice_notes=True,
+        can_send_polls=True,
+        can_send_other_messages=True,
+        can_add_web_page_previews=True
+    )
 
     await bot.restrict_chat_member(
         chat_id=chat_id,
@@ -160,7 +217,7 @@ async def unmute_user(
 
 
 # ============================================================
-# /START
+# START
 # ============================================================
 
 async def start(
@@ -169,12 +226,13 @@ async def start(
 ):
 
     if not update.message:
+
         return
 
     await update.message.reply_text(
         "🤖 <b>FORCE RANK BOT</b>\n\n"
         "Bot aktif.\n\n"
-        "Admin:\n"
+        "Command admin:\n\n"
         "• /forcerank\n"
         "• /unforcerank\n"
         "• /forceranklist",
@@ -183,7 +241,7 @@ async def start(
 
 
 # ============================================================
-# /FORCERANK
+# FORCE RANK
 # ============================================================
 
 async def force_rank(
@@ -192,56 +250,66 @@ async def force_rank(
 ):
 
     message = update.effective_message
+    chat = update.effective_chat
+    admin = update.effective_user
 
-    if not message:
+    if not message or not chat or not admin:
+
         return
 
-    chat = update.effective_chat
-
     # --------------------------------------------------------
-    # HARUS GROUP
+    # GROUP ONLY
     # --------------------------------------------------------
 
-    if chat.type not in [
+    if chat.type not in (
         "group",
         "supergroup"
-    ]:
+    ):
 
         await message.reply_text(
-            "❌ Command ini hanya bisa digunakan di grup."
+            "❌ Command ini hanya dapat "
+            "digunakan di grup."
         )
 
         return
 
     # --------------------------------------------------------
-    # ADMIN
+    # ADMIN CHECK
     # --------------------------------------------------------
 
-    if not await is_admin(update, context):
+    if not await is_admin(
+        update,
+        context
+    ):
 
         await message.reply_text(
-            "❌ Command ini khusus admin."
+            "❌ Command ini hanya dapat "
+            "digunakan oleh admin."
         )
 
         return
 
     # --------------------------------------------------------
-    # HARUS REPLY
+    # REPLY CHECK
     # --------------------------------------------------------
 
     if not message.reply_to_message:
 
         await message.reply_text(
-            "❌ Reply pesan member yang ingin "
-            "di-force rank.\n\n"
+            "❌ Kamu harus reply pesan "
+            "member terlebih dahulu.\n\n"
             "Contoh:\n"
-            "Reply pesan A lalu ketik:\n"
+            "Reply pesan member lalu ketik:\n"
             "/forcerank"
         )
 
         return
 
-    target = message.reply_to_message.from_user
+    target = (
+        message
+        .reply_to_message
+        .from_user
+    )
 
     if not target:
 
@@ -252,26 +320,30 @@ async def force_rank(
         return
 
     # --------------------------------------------------------
-    # BOT
+    # BOT CHECK
     # --------------------------------------------------------
 
     if target.is_bot:
 
         await message.reply_text(
-            "❌ Bot tidak bisa di-force rank."
+            "❌ Bot tidak bisa terkena "
+            "Force Rank."
         )
 
         return
 
     # --------------------------------------------------------
-    # CEK TARGET
+    # TARGET MEMBER
     # --------------------------------------------------------
 
     try:
 
-        target_member = await context.bot.get_chat_member(
-            chat.id,
-            target.id
+        target_member = (
+            await context.bot
+            .get_chat_member(
+                chat_id=chat.id,
+                user_id=target.id
+            )
         )
 
     except Exception as e:
@@ -279,7 +351,8 @@ async def force_rank(
         logger.exception(e)
 
         await message.reply_text(
-            "❌ Gagal mendapatkan data member."
+            "❌ Gagal mendapatkan "
+            "informasi member."
         )
 
         return
@@ -288,20 +361,20 @@ async def force_rank(
     # ADMIN / OWNER
     # --------------------------------------------------------
 
-    if target_member.status in [
+    if target_member.status in (
         ChatMemberStatus.ADMINISTRATOR,
         ChatMemberStatus.OWNER
-    ]:
+    ):
 
         await message.reply_text(
-            "❌ Tidak bisa melakukan Force Rank "
-            "kepada admin/owner."
+            "❌ Tidak bisa melakukan "
+            "Force Rank kepada admin."
         )
 
         return
 
     # --------------------------------------------------------
-    # SUDAH TERDAFTAR?
+    # CHECK EXISTING
     # --------------------------------------------------------
 
     existing = get_force_rank(
@@ -313,7 +386,7 @@ async def force_rank(
 
         await message.reply_text(
             f"⚠️ {mention_user(target)} "
-            "sudah terkena Force Rank.",
+            "sudah sedang terkena Force Rank.",
             parse_mode="HTML"
         )
 
@@ -333,19 +406,23 @@ async def force_rank(
 
     except Exception as e:
 
-        logger.exception(e)
+        logger.exception(
+            "Gagal mute: %s",
+            e
+        )
 
         await message.reply_text(
             "❌ <b>Gagal mute member.</b>\n\n"
-            "Pastikan bot merupakan admin grup "
-            "dan memiliki izin <b>Restrict Members</b>.",
+            "Pastikan bot merupakan admin "
+            "dan memiliki izin:\n"
+            "✅ Restrict Members",
             parse_mode="HTML"
         )
 
         return
 
     # --------------------------------------------------------
-    # DATABASE
+    # SAVE DATABASE
     # --------------------------------------------------------
 
     add_force_rank(
@@ -353,7 +430,7 @@ async def force_rank(
         user_id=target.id,
         nama=target.full_name,
         username=target.username,
-        forced_by=update.effective_user.id
+        forced_by=admin.id
     )
 
     # --------------------------------------------------------
@@ -369,48 +446,43 @@ async def force_rank(
         ]
     ]
 
-    reply_markup = InlineKeyboardMarkup(
+    markup = InlineKeyboardMarkup(
         keyboard
     )
 
-    username = (
-        f"@{html.escape(target.username)}"
-        if target.username
-        else "Tidak ada username"
-    )
-
     # --------------------------------------------------------
-    # PESAN FORCE RANK
+    # MESSAGE
     # --------------------------------------------------------
 
     text = (
         "🔔 <b>FORCE RANK</b>\n\n"
 
         f"👤 User: {mention_user(target)}\n"
-        f"🔹 Username: {username}\n\n"
+        f"🔹 Username: "
+        f"{username_text(target)}\n\n"
 
         "🔇 <b>Status: MUTED</b>\n"
         "📝 <b>Rank: BELUM DIISI</b>\n\n"
 
-        "Silakan isi rank terlebih dahulu "
-        "dengan memberikan komentar pada "
-        "postingan rank.\n\n"
+        "Silakan isi rank melalui "
+        "komentar pada postingan rank.\n\n"
 
-        "Setelah kamu berkomentar di postingan "
-        "rank, bot akan otomatis membuka mute.\n\n"
+        "Setelah kamu memberikan komentar "
+        "pada postingan rank, bot akan "
+        "otomatis membuka mute kamu.\n\n"
 
-        "👇 <b>Klik tombol di bawah:</b>"
+        "👇 <b>Klik tombol berikut:</b>"
     )
 
     await message.reply_text(
         text,
         parse_mode="HTML",
-        reply_markup=reply_markup
+        reply_markup=markup
     )
 
 
 # ============================================================
-# /UNFORCERANK
+# UNFORCERANK
 # ============================================================
 
 async def unforce_rank(
@@ -419,20 +491,23 @@ async def unforce_rank(
 ):
 
     message = update.effective_message
-
-    if not message:
-        return
-
     chat = update.effective_chat
 
-    if chat.type not in [
-        "group",
-        "supergroup"
-    ]:
+    if not message or not chat:
 
         return
 
-    if not await is_admin(update, context):
+    if chat.type not in (
+        "group",
+        "supergroup"
+    ):
+
+        return
+
+    if not await is_admin(
+        update,
+        context
+    ):
 
         await message.reply_text(
             "❌ Command ini khusus admin."
@@ -443,15 +518,20 @@ async def unforce_rank(
     if not message.reply_to_message:
 
         await message.reply_text(
-            "❌ Reply pesan user lalu ketik "
-            "/unforcerank"
+            "❌ Reply pesan member "
+            "lalu ketik /unforcerank."
         )
 
         return
 
-    target = message.reply_to_message.from_user
+    target = (
+        message
+        .reply_to_message
+        .from_user
+    )
 
     if not target:
+
         return
 
     existing = get_force_rank(
@@ -462,8 +542,8 @@ async def unforce_rank(
     if not existing:
 
         await message.reply_text(
-            "⚠️ User tersebut tidak sedang "
-            "terkena Force Rank."
+            "⚠️ Member tersebut tidak "
+            "sedang terkena Force Rank."
         )
 
         return
@@ -494,13 +574,13 @@ async def unforce_rank(
     await message.reply_text(
         "✅ <b>FORCE RANK DIBATALKAN</b>\n\n"
         f"👤 {mention_user(target)}\n"
-        "🔊 Status: UNMUTED",
+        "🔊 Status: <b>UNMUTED</b>",
         parse_mode="HTML"
     )
 
 
 # ============================================================
-# /FORCERANKLIST
+# FORCE RANK LIST
 # ============================================================
 
 async def force_rank_list(
@@ -509,20 +589,23 @@ async def force_rank_list(
 ):
 
     message = update.effective_message
-
-    if not message:
-        return
-
     chat = update.effective_chat
 
-    if chat.type not in [
-        "group",
-        "supergroup"
-    ]:
+    if not message or not chat:
 
         return
 
-    if not await is_admin(update, context):
+    if chat.type not in (
+        "group",
+        "supergroup"
+    ):
+
+        return
+
+    if not await is_admin(
+        update,
+        context
+    ):
 
         await message.reply_text(
             "❌ Command ini khusus admin."
@@ -547,7 +630,7 @@ async def force_rank_list(
         "🔒 <b>FORCE RANK AKTIF</b>\n\n"
     )
 
-    for index, user in enumerate(
+    for number, user in enumerate(
         users,
         start=1
     ):
@@ -570,8 +653,8 @@ async def force_rank_list(
             username = "tanpa username"
 
         text += (
-            f"<b>{index}. {nama}</b>\n"
-            f"   ├ Username: {username}\n"
+            f"<b>{number}. {nama}</b>\n"
+            f"   ├ {username}\n"
             f"   └ 🔇 BELUM ISI RANK\n\n"
         )
 
@@ -582,25 +665,18 @@ async def force_rank_list(
 
 
 # ============================================================
-# CEK APAKAH PESAN ADALAH KOMENTAR RANK
+# CEK KOMENTAR RANK
 # ============================================================
 
 def is_rank_comment(message):
 
     if not message:
-        return False
 
-    # --------------------------------------------------------
-    # Harus punya user
-    # --------------------------------------------------------
+        return False
 
     if not message.from_user:
 
         return False
-
-    # --------------------------------------------------------
-    # Harus berupa reply
-    # --------------------------------------------------------
 
     replied = message.reply_to_message
 
@@ -608,9 +684,9 @@ def is_rank_comment(message):
 
         return False
 
-    # --------------------------------------------------------
-    # Cara baru PTB / Bot API
-    # --------------------------------------------------------
+    # ========================================================
+    # TELEGRAM BOT API BARU
+    # ========================================================
 
     origin = getattr(
         replied,
@@ -644,17 +720,25 @@ def is_rank_comment(message):
             and origin_message_id == RANK_POST_ID
         ):
 
-            username = (
-                origin_chat.username or ""
+            channel_username = (
+                getattr(
+                    origin_chat,
+                    "username",
+                    ""
+                )
+                or ""
             ).lower()
 
-            if username == RANK_CHANNEL.lower():
+            if (
+                channel_username
+                == RANK_CHANNEL.lower()
+            ):
 
                 return True
 
-    # --------------------------------------------------------
-    # Kompatibilitas versi lama
-    # --------------------------------------------------------
+    # ========================================================
+    # TELEGRAM API LAMA
+    # ========================================================
 
     old_chat = getattr(
         replied,
@@ -670,13 +754,20 @@ def is_rank_comment(message):
 
     if old_chat and old_message_id:
 
-        username = (
-            old_chat.username or ""
+        channel_username = (
+            getattr(
+                old_chat,
+                "username",
+                ""
+            )
+            or ""
         ).lower()
 
         if (
-            username == RANK_CHANNEL.lower()
-            and old_message_id == RANK_POST_ID
+            channel_username
+            == RANK_CHANNEL.lower()
+            and old_message_id
+            == RANK_POST_ID
         ):
 
             return True
@@ -685,7 +776,7 @@ def is_rank_comment(message):
 
 
 # ============================================================
-# KOMENTAR RANK TERDETEKSI
+# KOMENTAR RANK HANDLER
 # ============================================================
 
 async def rank_comment_handler(
@@ -696,10 +787,11 @@ async def rank_comment_handler(
     message = update.effective_message
 
     if not message:
+
         return
 
     # --------------------------------------------------------
-    # CEK APAKAH KOMENTAR DI POST #9
+    # BUKAN KOMENTAR RANK
     # --------------------------------------------------------
 
     if not is_rank_comment(message):
@@ -713,19 +805,316 @@ async def rank_comment_handler(
         return
 
     logger.info(
-        "Komentar rank terdeteksi: %s (%s)",
-        user.full_name,
+        "===================================="
+    )
+
+    logger.info(
+        "KOMENTAR RANK TERDETEKSI"
+    )
+
+    logger.info(
+        "User: %s",
+        user.full_name
+    )
+
+    logger.info(
+        "User ID: %s",
         user.id
     )
 
+    logger.info(
+        "===================================="
+    )
+
     # --------------------------------------------------------
-    # CARI SEMUA GROUP YANG USER INI SEDANG FORCE RANK
+    # CARI FORCE RANK USER
     # --------------------------------------------------------
 
-    # Karena satu user bisa berada di beberapa grup,
-    # kita cari berdasarkan database.
+    records = get_force_rank_by_user(
+        user.id
+    )
 
-    # Ambil chat_id dari context cache sederhana.
-    #
-    # Kita akan menggunakan database function tambahan
-    # di bawah.
+    if not records:
+
+        logger.info(
+            "User tidak sedang Force Rank."
+        )
+
+        return
+
+    # --------------------------------------------------------
+    # PROSES
+    # --------------------------------------------------------
+
+    for record in records:
+
+        main_chat_id = record["chat_id"]
+
+        forced_by = record["forced_by"]
+
+        try:
+
+            # ================================================
+            # UNMUTE
+            # ================================================
+
+            await unmute_user(
+                context.bot,
+                main_chat_id,
+                user.id
+            )
+
+            logger.info(
+                "User %s berhasil di-unmute dari %s",
+                user.id,
+                main_chat_id
+            )
+
+        except Exception as e:
+
+            logger.exception(
+                "Gagal unmute user: %s",
+                e
+            )
+
+            continue
+
+        # ================================================
+        # REMOVE DATABASE
+        # ================================================
+
+        remove_force_rank(
+            main_chat_id,
+            user.id
+        )
+
+        # ================================================
+        # USER MENTION
+        # ================================================
+
+        mention = mention_user(
+            user
+        )
+
+        username = username_text(
+            user
+        )
+
+        # ================================================
+        # NOTIFIKASI GROUP
+        # ================================================
+
+        group_notification = (
+            "✅ <b>FORCE RANK SELESAI</b>\n\n"
+
+            f"👤 User: {mention}\n"
+            f"🔹 Username: {username}\n\n"
+
+            "📝 Rank: <b>SUDAH DIISI</b>\n"
+            "💬 Komentar: <b>TERDETEKSI</b>\n"
+            "🔊 Status: <b>UNMUTED OTOMATIS</b>\n\n"
+
+            "🎉 User telah menyelesaikan "
+            "Force Rank."
+        )
+
+        try:
+
+            await context.bot.send_message(
+                chat_id=main_chat_id,
+                text=group_notification,
+                parse_mode="HTML"
+            )
+
+        except Exception as e:
+
+            logger.exception(
+                "Gagal mengirim notifikasi grup: %s",
+                e
+            )
+
+        # ================================================
+        # NOTIFIKASI ADMIN
+        # ================================================
+
+        admin_notification = (
+            "🔔 <b>NOTIFIKASI FORCE RANK</b>\n\n"
+
+            f"👤 User: {mention}\n"
+            f"🔹 Username: {username}\n\n"
+
+            "✅ Telah mengisi rank\n"
+            "🔊 Telah di-unmute otomatis\n\n"
+
+            "📌 Postingan rank:\n"
+            f"{RANK_LINK}"
+        )
+
+        try:
+
+            await context.bot.send_message(
+                chat_id=forced_by,
+                text=admin_notification,
+                parse_mode="HTML"
+            )
+
+        except Exception as e:
+
+            logger.warning(
+                "Tidak bisa DM admin %s: %s",
+                forced_by,
+                e
+            )
+
+            
+        # ================================================
+        # REPLY KOMENTAR
+        # ================================================
+
+        try:
+
+            await message.reply_text(
+                "✅ <b>Rank terdeteksi!</b>\n\n"
+                "🔊 Kamu sudah di-unmute "
+                "dari grup.\n\n"
+                "🎉 Selamat datang kembali!",
+                parse_mode="HTML"
+            )
+
+        except Exception as e:
+
+            logger.warning(
+                "Gagal reply komentar: %s",
+                e
+            )
+
+
+# ============================================================
+# ERROR HANDLER
+# ============================================================
+
+async def error_handler(
+    update: object,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    logger.exception(
+        "Terjadi error:",
+        exc_info=context.error
+    )
+
+
+# ============================================================
+# MAIN
+# ============================================================
+
+def main():
+
+    # --------------------------------------------------------
+    # DATABASE
+    # --------------------------------------------------------
+
+    init_db()
+
+    # --------------------------------------------------------
+    # APPLICATION
+    # --------------------------------------------------------
+
+    application = (
+        ApplicationBuilder()
+        .token(BOT_TOKEN)
+        .build()
+    )
+
+    # --------------------------------------------------------
+    # COMMANDS
+    # --------------------------------------------------------
+
+    application.add_handler(
+        CommandHandler(
+            "start",
+            start
+        )
+    )
+
+    application.add_handler(
+        CommandHandler(
+            "forcerank",
+            force_rank
+        )
+    )
+
+    application.add_handler(
+        CommandHandler(
+            "unforcerank",
+            unforce_rank
+        )
+    )
+
+    application.add_handler(
+        CommandHandler(
+            "forceranklist",
+            force_rank_list
+        )
+    )
+
+    # --------------------------------------------------------
+    # KOMENTAR RANK
+    # --------------------------------------------------------
+
+    application.add_handler(
+        MessageHandler(
+            filters.ALL,
+            rank_comment_handler
+        )
+    )
+
+    # --------------------------------------------------------
+    # ERROR
+    # --------------------------------------------------------
+
+    application.add_error_handler(
+        error_handler
+    )
+
+    # --------------------------------------------------------
+    # START
+    # --------------------------------------------------------
+
+    print("")
+    print("========================================")
+    print("🤖 FORCE RANK BOT")
+    print("========================================")
+    print(
+        "📌 Channel :",
+        RANK_CHANNEL
+    )
+    print(
+        "📌 Post    :",
+        RANK_POST_ID
+    )
+    print(
+        "🔗 Link    :",
+        RANK_LINK
+    )
+    print("========================================")
+    print("✅ BOT ONLINE")
+    print("========================================")
+    print("")
+
+    # --------------------------------------------------------
+    # POLLING
+    # --------------------------------------------------------
+
+    application.run_polling(
+        allowed_updates=Update.ALL_TYPES
+    )
+
+
+# ============================================================
+# RUN
+# ============================================================
+
+if __name__ == "__main__":
+    main()
+         
