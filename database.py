@@ -2,53 +2,40 @@ import os
 import sqlite3
 from datetime import datetime
 
-
-BASE_DIR = os.path.dirname(
-    os.path.abspath(__file__)
-)
-
-DB_PATH = os.path.join(
-    BASE_DIR,
-    "forcerank.db"
-)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, "forcerank.db")
 
 
-def get_connection():
-    conn = sqlite3.connect(
-        DB_PATH,
-        check_same_thread=False
-    )
-
+def db():
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
-
     return conn
 
 
 def init_db():
+    conn = db()
+    cur = conn.cursor()
 
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute("""
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS users (
-            chat_id INTEGER NOT NULL,
-            user_id INTEGER NOT NULL,
+            chat_id INTEGER,
+            user_id INTEGER,
             name TEXT,
             username TEXT,
-            last_seen TEXT,
-            PRIMARY KEY(chat_id, user_id)
+            updated_at TEXT,
+            PRIMARY KEY (chat_id, user_id)
         )
     """)
 
-    cursor.execute("""
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS force_rank (
-            chat_id INTEGER NOT NULL,
-            user_id INTEGER NOT NULL,
+            chat_id INTEGER,
+            user_id INTEGER,
             name TEXT,
             username TEXT,
             forced_by INTEGER,
-            forced_at TEXT,
-            PRIMARY KEY(chat_id, user_id)
+            created_at TEXT,
+            PRIMARY KEY (chat_id, user_id)
         )
     """)
 
@@ -56,85 +43,47 @@ def init_db():
     conn.close()
 
 
-# ============================================================
-# USER
-# ============================================================
-
-def save_user(
-    chat_id,
-    user_id,
-    name,
-    username
-):
-
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        INSERT INTO users (
-            chat_id,
-            user_id,
-            name,
-            username,
-            last_seen
-        )
+def save_user(chat_id, user_id, name, username):
+    conn = db()
+    conn.execute("""
+        INSERT INTO users
+        (chat_id, user_id, name, username, updated_at)
         VALUES (?, ?, ?, ?, ?)
-
         ON CONFLICT(chat_id, user_id)
         DO UPDATE SET
-            name = excluded.name,
-            username = excluded.username,
-            last_seen = excluded.last_seen
+            name=excluded.name,
+            username=excluded.username,
+            updated_at=excluded.updated_at
     """, (
         chat_id,
         user_id,
         name,
         username,
-        datetime.now().strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
+        datetime.now().isoformat()
     ))
 
     conn.commit()
     conn.close()
 
 
-def find_user_by_username(
-    chat_id,
-    username
-):
+def find_user(chat_id, username):
+    username = username.replace("@", "").lower()
 
-    username = (
-        username
-        .replace("@", "")
-        .strip()
-        .lower()
-    )
-
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute("""
+    conn = db()
+    row = conn.execute("""
         SELECT *
         FROM users
-        WHERE chat_id = ?
-        AND LOWER(username) = ?
+        WHERE chat_id=?
+        AND LOWER(username)=?
         LIMIT 1
     """, (
         chat_id,
         username
-    ))
-
-    result = cursor.fetchone()
+    )).fetchone()
 
     conn.close()
+    return row
 
-    return result
-
-
-# ============================================================
-# FORCE RANK
-# ============================================================
 
 def add_force_rank(
     chat_id,
@@ -143,18 +92,17 @@ def add_force_rank(
     username,
     forced_by
 ):
+    conn = db()
 
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        INSERT OR REPLACE INTO force_rank (
+    conn.execute("""
+        INSERT OR REPLACE INTO force_rank
+        (
             chat_id,
             user_id,
             name,
             username,
             forced_by,
-            forced_at
+            created_at
         )
         VALUES (?, ?, ?, ?, ?, ?)
     """, (
@@ -163,104 +111,75 @@ def add_force_rank(
         name,
         username,
         forced_by,
-        datetime.now().strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
+        datetime.now().isoformat()
     ))
 
     conn.commit()
     conn.close()
 
 
-def get_force_rank(
-    chat_id,
-    user_id
-):
+def get_force_rank(chat_id, user_id):
+    conn = db()
 
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute("""
+    row = conn.execute("""
         SELECT *
         FROM force_rank
-        WHERE chat_id = ?
-        AND user_id = ?
+        WHERE chat_id=?
+        AND user_id=?
         LIMIT 1
     """, (
         chat_id,
         user_id
-    ))
-
-    result = cursor.fetchone()
+    )).fetchone()
 
     conn.close()
+    return row
 
-    return result
 
+def get_all_force_rank(chat_id):
+    conn = db()
 
-def get_all_force_rank(
-    chat_id
-):
-
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute("""
+    rows = conn.execute("""
         SELECT *
         FROM force_rank
-        WHERE chat_id = ?
-        ORDER BY forced_at ASC
+        WHERE chat_id=?
+        ORDER BY created_at ASC
     """, (
         chat_id,
-    ))
-
-    results = cursor.fetchall()
+    )).fetchall()
 
     conn.close()
+    return rows
 
-    return results
 
+def get_force_rank_by_user(user_id):
+    conn = db()
 
-def get_force_rank_by_user(
-    user_id
-):
-
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute("""
+    rows = conn.execute("""
         SELECT *
         FROM force_rank
-        WHERE user_id = ?
+        WHERE user_id=?
     """, (
         user_id,
-    ))
-
-    results = cursor.fetchall()
+    )).fetchall()
 
     conn.close()
+    return rows
 
-    return results
 
+def remove_force_rank(chat_id, user_id):
+    conn = db()
 
-def remove_force_rank(
-    chat_id,
-    user_id
-):
-
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute("""
+    cur = conn.execute("""
         DELETE FROM force_rank
-        WHERE chat_id = ?
-        AND user_id = ?
+        WHERE chat_id=?
+        AND user_id=?
     """, (
         chat_id,
         user_id
     ))
 
-    deleted = cursor.rowcount
+    deleted = cur.rowcount
 
     conn.commit()
     conn.close()
